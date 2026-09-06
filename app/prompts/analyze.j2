@@ -1,0 +1,107 @@
+## Failure
+
+Project: {{ project.name }}
+{% if project.tech_stack %}Stack: {{ project.tech_stack | join(', ') }}
+{% endif %}Branch: {{ pipeline.ref }}{% if pipeline.ref == project.default_branch %} (default branch){% endif %}
+
+Stage: {{ job.stage_name or 'unknown' }} · Job: {{ job.name or 'unknown' }}
+Exit code: {{ job.exit_code if job.exit_code is not none else 'unknown' }}
+{% if failure.occurrence_index > 1 %}
+This is occurrence #{{ failure.occurrence_index }} of this exact error signature in this project.
+{% endif %}
+{%- if failure.is_flaky %}
+NOTE: this job has previously PASSED on the same commit — it is likely flaky.
+{%- endif %}
+
+## Pre-classification
+
+{{ classification.category }}{% if classification.subcategory %} / {{ classification.subcategory }}{% endif %} (confidence {{ classification.confidence }}, method: {{ classification.source }})
+{% if classification.matched_rules %}Matched patterns: {{ classification.matched_rules | join(', ') }}
+{% endif %}
+Treat this as a strong prior. Override it only if the evidence clearly contradicts it,
+and say why if you do.
+
+{% if pipeline.changed_files %}
+## Files changed in this commit
+{% for file in pipeline.changed_files[:20] %}
+- {{ file.path }} ({{ file.change_type }}, +{{ file.additions }}/-{{ file.deletions }}){% if file.is_config %} [CONFIG]{% endif %}{% if file.is_dependency %} [DEPENDENCY]{% endif %}
+
+{%- endfor %}
+{% if pipeline.previous_status == 'success' %}
+The previous pipeline on this branch SUCCEEDED. This change is a strong regression candidate.
+{%- elif pipeline.previous_status == 'failed' %}
+The previous pipeline on this branch ALSO FAILED. This may be pre-existing rather than a regression.
+{%- endif %}
+{% endif %}
+
+{% if job.baseline_duration_seconds %}
+## Timing
+
+This job took {{ job.duration_seconds }}s against a normal duration of
+{{ job.baseline_duration_seconds | round | int }}s
+({{ (job.duration_seconds / job.baseline_duration_seconds) | round(1) }}x baseline).
+{% endif %}
+
+## Log excerpt
+
+Lines {{ log.start_line }}–{{ log.end_line }} of {{ log.total_lines }}.
+Secrets have been redacted: `[REDACTED_*]` markers are placeholders, NOT the
+literal values, and must never be treated as the cause.
+
+```
+{{ log.excerpt }}
+```
+
+{% if stack_trace %}
+## Stack trace
+
+```
+{{ stack_trace }}
+```
+{% endif %}
+
+{% if rag.signature_history and rag.signature_history.is_known %}
+## KNOWN ISSUE — this exact signature has a confirmed resolution
+
+Seen {{ rag.signature_history.occurrence_count }} times before.
+Root cause: {{ rag.signature_history.known_root_cause }}
+Resolution: {{ rag.signature_history.known_resolution }}
+
+Verify this matches the current evidence. If it does, lead with it and set
+confidence high.
+{% endif %}
+
+{% if rag.similar_failures %}
+## Similar past failures in this workspace
+{% for failure in rag.similar_failures %}
+- {{ (failure.similarity * 100) | round | int }}% similar · {{ failure.project_name }} · {{ failure.occurred_at[:10] if failure.occurred_at else 'unknown date' }}
+{%- if failure.root_cause %}
+  Root cause: {{ failure.root_cause }}
+{%- endif %}
+{%- if failure.resolution %}
+  Resolved by: {{ failure.resolution }}
+{%- else %}
+  (never resolved)
+{%- endif %}
+{%- endfor %}
+{% endif %}
+
+{% if rag.knowledge_chunks %}
+## Project documentation
+{% for chunk in rag.knowledge_chunks %}
+--- {{ chunk.title }} ---
+{{ chunk.content }}
+{% endfor %}
+{% endif %}
+
+## Task
+
+Analyse this failure and respond with JSON matching the provided schema.
+
+For `evidence`, cite only things that appear above. Use `source_ref` to point at
+the origin: `job_logs#L1294` for a log line, the file path for a changed file,
+`failure:<uuid>` for a historical failure.
+
+Set `is_transient` true ONLY for failures that would plausibly succeed on an
+unchanged retry — network blips, registry timeouts, runner loss. A code or
+configuration error is never transient.

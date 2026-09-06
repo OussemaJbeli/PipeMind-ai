@@ -1,0 +1,79 @@
+[project]
+name = "pipemind-ai"
+version = "0.1.0"
+description = "PipeMind intelligence layer — CI/CD failure analysis"
+requires-python = ">=3.11,<3.14"
+
+dependencies = [
+    # web
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.32,<1.0",
+    "pydantic>=2.9,<3.0",
+    "pydantic-settings>=2.6,<3.0",
+
+    # http + resilience
+    "httpx>=0.27,<1.0",
+    "tenacity>=9.0,<10.0",
+
+    # data
+    "sqlalchemy[asyncio]>=2.0.36,<3.0",
+    "psycopg[binary,pool]>=3.2,<4.0",
+    "pgvector>=0.3.6,<0.4",
+
+    # templating + observability
+    "jinja2>=3.1,<4.0",
+    "structlog>=24.4,<26.0",
+]
+
+[project.optional-dependencies]
+# Split out: torch + transformers is ~2 GB and files 06-07 do not need it.
+ml = [
+    "numpy>=1.26,<3.0",
+    "scikit-learn>=1.5,<2.0",
+    "scipy>=1.14,<2.0",
+    "joblib>=1.4,<2.0",
+    "sentence-transformers>=3.3,<4.0",
+]
+llm = [
+    "google-genai>=0.8,<2.0",
+    "openai>=1.57,<2.0",
+]
+dev = [
+    "pytest>=8.3,<9.0",
+    "pytest-asyncio>=0.24,<1.0",
+    "pytest-cov>=6.0,<7.0",
+    "ruff>=0.8,<1.0",
+    "respx>=0.21,<1.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# Explicit: auto-discovery fails when the repo has several top-level directories
+# (app, models, scripts, tests) and cannot tell which one is the package.
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E501",   # line length is handled by the formatter
+    "B008",   # FastAPI's Depends()/Header() in defaults is the documented pattern
+    # N818 wants every exception suffixed "Error". The base class is
+    # PipeMindAIError; the subclasses read as states ("RedactionFailed",
+    # "BudgetExceeded") and renaming them to RedactionFailedError would be worse.
+    "N818",
+    # RUF001 flags the ambiguous-unicode characters in the test-output markers.
+    # They are LITERAL characters printed by Jest, Vitest and Pest, so they have
+    # to stay exactly as-is for the patterns to match.
+    "RUF001",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

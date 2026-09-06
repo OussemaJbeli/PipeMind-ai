@@ -1,0 +1,43 @@
+Running with gitlab-runner 16.11.0 (91a27b2a)
+  on docker-runner-1 J2xk9Qz1, system ID: s_8f0c1b2d3e4f
+section_start:1756563004:prepare_executor
+Preparing the "docker" executor
+Using Docker executor with image php:8.3-cli ...
+section_end:1756563008:prepare_executor
+section_start:1756563008:step_script
+$ composer install --no-interaction --prefer-dist
+Loading composer repositories with package information
+Installing dependencies from lock file (including require-dev)
+Nothing to install, update or remove
+Generating optimized autoload files
+$ php artisan migrate --force
+   INFO  Running migrations.
+$ php artisan test --testsuite=Integration
+   PASS  Tests\Integration\HealthTest
+  ✓ health endpoint responds
+
+   FAIL  Tests\Integration\DatabaseTest
+  ⨯ it connects to the database
+
+  ---
+
+  • Tests\Integration\DatabaseTest > it connects to the database
+   SQLSTATE[HY000] [2002] Connection refused
+
+  at vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:70
+     66▕     {
+     67▕         try {
+     68▕             return $this->createPdoConnection($dsn, $username, $password, $options);
+     69▕         } catch (Exception $e) {
+  ➜  70▕             return $this->tryAgainIfCausedByLostConnection($e, $dsn, $username, $password, $options);
+     71▕         }
+     72▕     }
+
+      +9 vendor frames
+  10  tests/Integration/DatabaseTest.php:18
+
+  Tests:    1 failed, 1 passed (2 assertions)
+  Duration: 3.42s
+
+section_end:1756563138:step_script
+ERROR: Job failed: exit code 1

@@ -1,0 +1,44 @@
+{
+  "contract_version": "v1",
+  "team_id": 1,
+  "failure": {
+    "uuid": "3f2a1b4c-0000-4000-8000-000000000001",
+    "occurrence_index": 4,
+    "is_flaky": false,
+    "signature_hash": "31d65f0b8fe279d8a1c4e7b2f9d03e5c8a6b1f4d2e7c9a0b3d6e8f1a4c7b2d9e",
+    "ecosystem": "php"
+  },
+  "project": {
+    "uuid": "3f2a1b4c-0000-4000-8000-000000000002",
+    "name": "biker-api",
+    "tech_stack": ["Laravel", "PHP", "Docker", "PostgreSQL"],
+    "provider": "github",
+    "default_branch": "main"
+  },
+  "pipeline": {
+    "iid": 821,
+    "ref": "feature/payment-webhook",
+    "source": "push",
+    "commit_sha": "a82c91f",
+    "commit_message": "wire payment webhook",
+    "duration_seconds": 134,
+    "previous_status": "success",
+    "changed_files": [
+      {"path": "docker-compose.yml", "change_type": "modified", "additions": 4, "deletions": 1, "is_config": true, "is_dependency": false},
+      {"path": "app/Services/PaymentService.php", "change_type": "modified", "additions": 62, "deletions": 8, "is_config": false, "is_dependency": false}
+    ]
+  },
+  "job": {
+    "name": "backend-tests",
+    "stage_name": "test",
+    "status": "failed",
+    "exit_code": 1,
+    "duration_seconds": 92,
+    "baseline_duration_seconds": 41.0
+  },
+  "log_excerpt": "$ php artisan test --testsuite=Integration\n   FAIL  Tests\\Integration\\DatabaseTest\n  • DatabaseTest > it connects\n   SQLSTATE[HY000] [2002] Connection refused\n  at vendor/laravel/framework/src/Database/Connectors/Connector.php:70\n     66▪     protected function createPdoConnection($dsn, $username, $password, $options)\n     70▶         return new PDO($dsn, $username, $password, $options);\n  Tests:    1 failed (0 assertions)\nERROR: Job failed: exit code 1",
+  "error_block": "SQLSTATE[HY000] [2002] Connection refused",
+  "stack_trace": "at vendor/laravel/framework/src/Database/Connectors/Connector.php:70\nat vendor/laravel/framework/src/Database/Connectors/Connector.php:44",
+  "use_rag": false,
+  "use_llm": true
+}
