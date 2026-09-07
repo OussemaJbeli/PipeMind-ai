@@ -45,6 +45,21 @@ NORMALIZERS: list[tuple[Pattern[str], str]] = [
         re.compile(r"\b\d+(?:\.\d+)?(?:ms|s|m|h|MB|GB|KB|MiB|GiB|KiB)\b", re.IGNORECASE),
         "<quantity>",
     ),
+    # Run-scoped identifiers, at ANY digit count. The generic <num> rule below
+    # only matches 3+ digits — a deliberate floor, so ":42" line numbers and small
+    # diagnostic codes survive. But that floor let short volatile values through:
+    # "pid=4821" normalised while "pid=99" and "pid=7" did not, so the same
+    # recurring failure produced a new signature on most runs. Deduplication, the
+    # analysis cache, occurrence_count and the known-signature short-circuit all
+    # hang off this hash — a leak here disables every one of them, silently.
+    (
+        re.compile(
+            r"\b(pid|ppid|tid|thread|worker|job|build|run|attempt|retry|try|seq)"
+            r"\s*[:=#]?\s*\d+\b",
+            re.IGNORECASE,
+        ),
+        r"\1=<num>",
+    ),
     (re.compile(r"\b\d{3,}\b"), "<num>"),
 ]
 

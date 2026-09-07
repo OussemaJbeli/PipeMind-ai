@@ -10,8 +10,14 @@ from typing import Any
 
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from app.core.errors import InvalidLLMResponse, LLMRateLimited, LLMTimeout, LLMUnavailable
-from app.providers.base import LLMResponse
+from app.core.errors import (
+    InvalidLLMResponse,
+    LLMAuthenticationFailed,
+    LLMRateLimited,
+    LLMTimeout,
+    LLMUnavailable,
+)
+from app.providers.base import LLMResponse, ProviderCheck
 
 
 class OpenAICompatibleProvider:
@@ -110,23 +116,59 @@ class OpenAICompatibleProvider:
     def _translate(exc: Exception) -> Exception:
         message = str(exc).lower()
 
-        if any(token in message for token in ("rate limit", "429")):
+        # Authentication first, and never on a bare substring: see the note in
+        # gemini.py about "rate" matching inside "GenerateContent".
+        #
+        # Non-retryable: a wrong key is a configuration mistake, and retrying it
+        # through tenacity, the fallback provider and the queue buries the one
+        # message that tells the user what to fix.
+        if any(token in message for token in (
+            "api key", "api_key", "401", "403", "authentication", "unauthorized",
+            "invalid_api_key",
+        )):
+            return LLMAuthenticationFailed(f"Provider rejected the credentials: {exc}")
+
+        if any(token in message for token in ("rate limit", "rate_limit", "429")):
             return LLMRateLimited(str(exc))
 
         if "timeout" in message:
             return LLMTimeout(str(exc))
 
-        if any(token in message for token in ("api key", "401", "authentication")):
-            return LLMUnavailable(f"Provider rejected the credentials: {exc}")
-
         return LLMUnavailable(str(exc))
 
     async def health(self) -> bool:
+        return (await self.verify()).ok
+
+    async def verify(self) -> ProviderCheck:
+        import time
+
+        started = time.perf_counter()
+
         try:
-            await self.complete(system="Reply with ok.", prompt="ok", max_tokens=8, timeout=10)
-            return True
-        except Exception:
-            return False
+            client = self._get_client()
+            names = [m.id for m in (await client.models.list()).data]
+        except Exception as exc:
+            return ProviderCheck(
+                ok=False, provider=self.name, model=self._model,
+                message=str(self._translate(exc)),
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
+
+        elapsed = int((time.perf_counter() - started) * 1000)
+
+        # Self-hosted gateways often expose no model list at all; an empty list
+        # is not evidence the model is missing, so only judge when we have one.
+        if names and self._model not in names:
+            return ProviderCheck(
+                ok=False, provider=self.name, model=self._model, models=sorted(names),
+                message=f"The key works, but '{self._model}' is not available to it.",
+                latency_ms=elapsed,
+            )
+
+        return ProviderCheck(
+            ok=True, provider=self.name, model=self._model, models=sorted(names),
+            message=f"Connected. {len(names)} models available.", latency_ms=elapsed,
+        )
 
     def cost(self, prompt_tokens: int, completion_tokens: int) -> float:
         return round(

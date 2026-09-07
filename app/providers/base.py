@@ -25,6 +25,25 @@ class LLMResponse:
         return self.prompt_tokens + self.completion_tokens
 
 
+@dataclass
+class ProviderCheck:
+    """The result of testing credentials, before anything is saved.
+
+    Mirrors the integration wizard: prove the connection works, then persist.
+    A key that only fails at analysis time fails an hour later, in a queue, to
+    nobody watching.
+    """
+
+    ok: bool
+    provider: str
+    model: str = ""
+    message: str = ""
+    # Non-empty only on success, and only where the provider will tell us
+    # cheaply — it lets the wizard offer a model picker instead of a text field.
+    models: list[str] = field(default_factory=list)
+    latency_ms: int = 0
+
+
 @runtime_checkable
 class LLMProvider(Protocol):
     name: str
@@ -41,5 +60,7 @@ class LLMProvider(Protocol):
     ) -> LLMResponse: ...
 
     async def health(self) -> bool: ...
+
+    async def verify(self) -> "ProviderCheck": ...
 
     def cost(self, prompt_tokens: int, completion_tokens: int) -> float: ...

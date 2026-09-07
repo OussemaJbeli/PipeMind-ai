@@ -8,6 +8,7 @@ is why M3 does not depend on it.
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 MODEL_PATH = Path(__file__).resolve().parents[3] / "models" / "classifier_v1.joblib"
 
@@ -21,7 +22,10 @@ class MLResult:
 
 class MLClassifier:
     def __init__(self) -> None:
-        self._pipeline = None
+        # Annotated because joblib ships no stubs: without this mypy infers the
+        # attribute as None and rejects every use, even though it is assigned
+        # inside the try below before ever being read.
+        self._pipeline: Any | None = None
         self._unavailable = False
 
     def available(self) -> bool:

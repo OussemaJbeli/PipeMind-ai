@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, Field
 
+from app.services.chunker import OVERLAP_TOKENS, TARGET_TOKENS
+
 
 class ChangedFile(BaseModel):
     path: str
@@ -10,9 +12,33 @@ class ChangedFile(BaseModel):
     deletions: int = 0
     is_config: bool = False
     is_dependency: bool = False
+    # The unified diff hunk. Both GitHub and GitLab return it in the same call
+    # that produces the counts above; without it the model is given a filename
+    # and asked to explain what went wrong inside it.
+    patch: str | None = None
+    patch_truncated: bool = False
+
+
+class SourceWindow(BaseModel):
+    """Lines around a location a stack trace pointed at.
+
+    The `line` is marked with `>` in `content`, because a model asked to count
+    lines to find the referenced one counts badly.
+    """
+
+    path: str
+    line: int
+    start_line: int
+    end_line: int
+    content: str
 
 
 class ProjectContext(BaseModel):
+    # Numeric id alongside the uuid: knowledge_documents.project_id is a bigint
+    # and the AI service reads that table directly, so retrieval needs the id to
+    # scope project documents. Optional for backwards compatibility — a payload
+    # without it falls back to team-wide knowledge only.
+    id: int | None = None
     uuid: str
     name: str
     tech_stack: list[str] = Field(default_factory=list)
@@ -75,11 +101,25 @@ class EmbedRequest(BaseModel):
     job_name: str | None = None
 
 
+class TestProviderRequest(BaseModel):
+    """The same shape as `llm_override`, so the wizard tests exactly what will
+    later be sent — testing a different shape proves nothing."""
+
+    provider: str
+    api_key: str | None = None
+    model: str | None = None
+    base_url: str | None = None
+
+
 class ChunkEmbedRequest(BaseModel):
     text: str
     title: str | None = None
-    target_tokens: int = 400
-    overlap_tokens: int = 50
+    # Bound to the chunker's constants, never restated. These were literal
+    # 400/50 copies, which silently shadowed the chunker: retuning chunk size
+    # there changed nothing for the only caller that matters, because every
+    # request arrived carrying the stale defaults explicitly.
+    target_tokens: int = TARGET_TOKENS
+    overlap_tokens: int = OVERLAP_TOKENS
 
 
 class SimilarRequest(BaseModel):
@@ -106,6 +146,10 @@ class AnalyzeRequest(BaseModel):
     log_excerpt: str = ""
     error_block: str | None = None
     stack_trace: str | None = None
+
+    # Resolved from the stack trace at request time. Empty is normal: the file
+    # may be gitignored, generated, or the provider may host no repository.
+    source_context: list[SourceWindow] = Field(default_factory=list)
 
     use_rag: bool = True
     use_llm: bool = True

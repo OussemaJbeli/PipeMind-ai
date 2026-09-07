@@ -27,11 +27,43 @@ and say why if you do.
 - {{ file.path }} ({{ file.change_type }}, +{{ file.additions }}/-{{ file.deletions }}){% if file.is_config %} [CONFIG]{% endif %}{% if file.is_dependency %} [DEPENDENCY]{% endif %}
 
 {%- endfor %}
+
+{% set diffed = pipeline.changed_files | selectattr('patch') | list %}
+{% if diffed %}
+## Diffs for those changes
+
+The exact lines that changed. Cite them directly — quote the changed line rather
+than describing the file it lives in.
+{% for file in diffed[:5] %}
+
+--- {{ file.path }} ---
+```diff
+{{ file.patch }}
+```
+{%- if file.patch_truncated %}
+(diff truncated)
+{%- endif %}
+{%- endfor %}
+{% endif %}
 {% if pipeline.previous_status == 'success' %}
 The previous pipeline on this branch SUCCEEDED. This change is a strong regression candidate.
 {%- elif pipeline.previous_status == 'failed' %}
 The previous pipeline on this branch ALSO FAILED. This may be pre-existing rather than a regression.
 {%- endif %}
+{% endif %}
+
+{% if source_context %}
+## Source at the locations the stack trace names
+
+The `>` marks the line the trace pointed at. These are the current contents at
+this commit, so a fix may quote them verbatim.
+{% for window in source_context %}
+
+--- {{ window.path }} (lines {{ window.start_line }}-{{ window.end_line }}) ---
+```
+{{ window.content }}
+```
+{%- endfor %}
 {% endif %}
 
 {% if job.baseline_duration_seconds %}

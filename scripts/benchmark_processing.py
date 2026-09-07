@@ -26,6 +26,60 @@ CASES = [
 ]
 
 
+def signature_arms() -> None:
+    """Signature stability and separation.
+
+    Reduction is the easy metric. This is the one deduplication depends on: if a
+    run-scoped value reaches the hash, the same recurring failure gets a fresh
+    signature every time and occurrence_count, the analysis cache and the
+    known-signature short-circuit all quietly stop working.
+    """
+    error = "SQLSTATE[HY000] [2002] Connection refused"
+
+    def sig(raw: str) -> str:
+        redaction = redactor.redact(raw)
+        extraction = log_processor.extract(log_processor.clean(redaction.text))
+        digest, _ = signature.signature_hash(
+            extraction.error_block or extraction.error_message or "",
+            ecosystem=extraction.ecosystem,
+        )
+        return digest
+
+    print("\nSignature stability — same error, growing noise:\n")
+    baseline = None
+    for noise in (0, 50, 1_000, 10_000, 50_000):
+        digest = sig(synthetic(noise, error))
+        baseline = baseline or digest
+        verdict = "STABLE" if digest == baseline else "DRIFTED"
+        print(f"  {noise:>6} noise lines   {digest[:16]}…   {verdict}")
+
+    print("\nVolatile identifiers — same failure, different run:\n")
+    runs = [
+        ("2026-08-30T14:30:11Z", "4821", "1"),
+        ("2026-09-01T09:12:44Z", "99", "2"),
+        ("2025-01-15T23:59:59Z", "7", "13"),
+    ]
+    digests = {
+        sig(synthetic(20, f"{error} at {ts} pid={pid} attempt {n}"))
+        for ts, pid, n in runs
+    }
+    print(f"  distinct across {len(runs)} runs: {len(digests)}   "
+          f"{'GOOD' if len(digests) == 1 else 'LEAKING — dedup is broken'}")
+
+    print("\nSeparation — distinct diagnoses must NOT collide:\n")
+    distinct = [
+        error,
+        "Error: connect ECONNREFUSED 127.0.0.1:5432",
+        "npm ERR! ERESOLVE unable to resolve dependency tree",
+        "FATAL ERROR: Reached heap limit Allocation failed",
+        "SQLSTATE[HY000] [1045] Access denied for user",
+    ]
+    seen = {sig(synthetic(20, e)): e for e in distinct}
+    for digest, text in seen.items():
+        print(f"  {digest[:16]}…   {text[:52]}")
+    print(f"\n  unique: {len(seen)}/{len(distinct)}")
+
+
 def synthetic(noise_lines: int, error: str) -> str:
     return "\n".join(
         [
@@ -96,6 +150,8 @@ def main() -> None:
     missed = [r["name"] for r in rows if not r["kept"]]
     print()
     print(f"root-cause retention: {len(rows) - len(missed)}/{len(rows)}")
+
+    signature_arms()
 
     if missed:
         print(f"LOST THE ROOT CAUSE IN: {', '.join(missed)}")

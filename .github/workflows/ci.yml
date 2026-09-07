@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint & tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # pgvector: the similarity queries use the `vector` type and the `<=>`
+        # cosine operator, neither of which exists in plain postgres.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: pipemind_test
+          POSTGRES_USER: pipemind
+          POSTGRES_PASSWORD: secret
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      APP_ENV: testing
+      DATABASE_URL: postgresql+psycopg://pipemind:secret@127.0.0.1:5432/pipemind_test
+      SERVICE_TOKEN: ci-shared-secret
+      LLM_PROVIDER: stub
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          # CPU torch from PyTorch's own index: the default PyPI wheel pulls
+          # ~2 GB of CUDA libraries this project never uses.
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -e ".[dev,ml,llm]"
+
+      - name: Lint
+        run: ruff check app tests scripts
+
+      - name: Types
+        run: mypy
+
+      # Reported, not gated. The open advisories are in `transformers`, a
+      # transitive dependency whose fixed versions need sentence-transformers 6.x
+      # — a three-major-version jump of the library that produces our embeddings.
+      # See PipeMind-data/database/schema/00-decisions.md.
+      - name: Dependency audit
+        continue-on-error: true
+        run: |
+          pip install pip-audit
+          pip-audit --progress-spinner off || true
+
+      # The contract lives in PipeMind-data, which is a different repository, so
+      # the drift test cannot run here. Everything else can.
+      - name: Tests
+        run: pytest -q --deselect tests/unit/test_contracts.py
+
+      # A dependency file that no longer matches the code is a build that works
+      # on one machine and nowhere else.
+      - name: Lockfile is current
+        run: |
+          pip freeze --exclude-editable > /tmp/frozen.txt
+          if ! diff <(grep -v '^#' requirements.lock.txt | sort) <(sort /tmp/frozen.txt) > /dev/null; then
+            echo "::warning::requirements.lock.txt differs from the resolved environment."
+            diff <(grep -v '^#' requirements.lock.txt | sort) <(sort /tmp/frozen.txt) || true
+          fi

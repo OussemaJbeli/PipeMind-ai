@@ -30,7 +30,12 @@ Rules you must follow:
 - Prefer the simplest explanation consistent with all the evidence.
 - When a historical failure with a confirmed resolution matches, lead with it.
 - Recommendations must be concrete and safe. Never recommend an action that could
-  destroy data or affect production without explicit human review."""
+  destroy data or affect production without explicit human review.
+- When you were shown the offending code and the fix is a small, certain edit,
+  include a `patch`: a unified diff with correct @@ hunk headers, touching ONLY
+  files whose contents or diff appear above. Quote the existing line exactly as
+  given. If you are guessing at the surrounding lines, omit the patch entirely —
+  a patch that does not apply is worse than none."""
 
 # Schema-constrained decoding: with this set, a compliant provider cannot emit
 # invalid JSON at all.
@@ -93,6 +98,12 @@ ANALYZE_SCHEMA: dict[str, Any] = {
                     },
                     "confidence": {"type": "number"},
                     "affected_files": {"type": "array", "items": {"type": "string"}},
+                    # A unified diff the user can read and apply. Constrained
+                    # hard on the way back out (see recommender.sanitize): a
+                    # patch touching a file the model was never shown is a
+                    # hallucination with a plausible shape, and the most
+                    # damaging thing this system could produce.
+                    "patch": {"type": "string"},
                 },
             },
         },
@@ -122,6 +133,7 @@ def render_analyze_prompt(request: Any, classification: Any, rag: Any, excerpt: 
             "total_lines": getattr(request, "total_lines", excerpt.count("\n") + 1),
         },
         stack_trace=request.stack_trace,
+        source_context=[w.model_dump() for w in request.source_context],
         rag={
             "signature_history": getattr(rag, "signature_history", None) if rag else None,
             "similar_failures": [f.model_dump() for f in rag.similar_failures] if rag else [],

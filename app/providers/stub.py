@@ -11,7 +11,7 @@ silent fake is worse than no fake.
 import json
 import time
 
-from app.providers.base import LLMResponse
+from app.providers.base import LLMResponse, ProviderCheck
 from app.services.classifier.hybrid import HybridClassifier
 
 STUB_MARKER = "[STUB — no LLM configured]"
@@ -91,6 +91,12 @@ class StubProvider:
 
     async def health(self) -> bool:
         return True
+
+    async def verify(self) -> ProviderCheck:
+        return ProviderCheck(
+            ok=True, provider=self.name, model=self._model,
+            message="The stub provider needs no credentials. Analyses are canned, not real.",
+        )
 
     def cost(self, prompt_tokens: int, completion_tokens: int) -> float:
         return 0.0

@@ -4,7 +4,7 @@ What you embed matters more than which model you use.
 """
 
 from functools import lru_cache
-from typing import Any
+from typing import Any, cast
 
 from app.config import settings
 
@@ -33,7 +33,8 @@ def embed_text(text: str) -> list[float]:
         show_progress_bar=False,
     )
 
-    return np.asarray(vec, dtype=np.float32).tolist()
+    # tolist() is typed as Any by numpy; the cast states what it actually is.
+    return cast(list[float], np.asarray(vec, dtype=np.float32).tolist())
 
 
 def embed_batch(texts: list[str]) -> list[list[float]]:

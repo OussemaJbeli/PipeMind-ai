@@ -50,7 +50,7 @@ async def analyze(request: AnalyzeRequest, session: AsyncSession | None = None) 
         rag = await retrieve_safely(
             session,
             team_id=request.team_id,
-            project_id=None,
+            project_id=request.project.id,
             error_message=basis[:600],
             category=classification.category,
             ecosystem=request.failure.ecosystem,
@@ -114,7 +114,9 @@ async def analyze(request: AnalyzeRequest, session: AsyncSession | None = None) 
         recommendations=[
             Recommendation(**r)
             for r in recommender.sanitize(
-                data.get("recommendations", []), is_default_branch=is_default_branch
+                data.get("recommendations", []),
+                is_default_branch=is_default_branch,
+                known_files=_shown_files(request),
             )
         ],
         similar_failures=rag.similar_failures if rag else [],
@@ -130,6 +132,19 @@ async def analyze(request: AnalyzeRequest, session: AsyncSession | None = None) 
             latency_ms=int((time.perf_counter() - started) * 1000),
         ),
     )
+
+
+def _shown_files(request: AnalyzeRequest) -> set[str]:
+    """Paths the model actually saw the contents of.
+
+    Only files whose diff or source appeared in the prompt. A changed file with
+    no patch is deliberately excluded: the model was told it changed, not what
+    changed in it, so a patch for it would be invention.
+    """
+    return {
+        *(f.path for f in request.pipeline.changed_files if f.patch),
+        *(w.path for w in request.source_context),
+    }
 
 
 def _valid_evidence(items: list[Any]) -> list[dict]:

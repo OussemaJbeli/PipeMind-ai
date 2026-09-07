@@ -82,3 +82,65 @@ async def test_fallback_does_not_mask_a_bad_response():
         await FallbackProvider(Garbage(), StubProvider()).complete(
             system="s", prompt="p", json_schema=ANALYZE_SCHEMA
         )
+
+
+class TestFallbackVerify:
+    """`verify()` was added to the protocol and every concrete provider, but not
+    to the wrapper — so verifying a fallback-configured provider raised
+    AttributeError at runtime. mypy caught it; these pin it."""
+
+    @pytest.mark.asyncio
+    async def test_a_healthy_primary_is_reported_as_itself(self):
+        check = await FallbackProvider(StubProvider(), StubProvider()).verify()
+
+        assert check.ok
+        assert check.provider == "stub"
+
+    @pytest.mark.asyncio
+    async def test_a_broken_primary_is_named_even_when_the_secondary_works(self):
+        from app.providers.base import ProviderCheck
+
+        class Broken:
+            name, model = "gemini", "none"
+
+            async def verify(self):
+                return ProviderCheck(ok=False, provider="gemini", message="bad key")
+
+            async def health(self):
+                return False
+
+            def cost(self, *_):
+                return 0.0
+
+        check = await FallbackProvider(Broken(), StubProvider()).verify()
+
+        # ok, because analyses will still run — but the message must say the
+        # primary is broken. Reporting plain success would tell the user their
+        # Gemini key works when it does not.
+        assert check.ok
+        assert "gemini" in check.provider and "stub" in check.provider
+        assert "bad key" in check.message
+
+    @pytest.mark.asyncio
+    async def test_both_broken_reports_the_primary_failure(self):
+        from app.providers.base import ProviderCheck
+
+        class Broken:
+            def __init__(self, name):
+                self.name, self.model = name, "none"
+
+            async def verify(self):
+                return ProviderCheck(ok=False, provider=self.name, message=f"{self.name} down")
+
+            async def health(self):
+                return False
+
+            def cost(self, *_):
+                return 0.0
+
+        check = await FallbackProvider(Broken("gemini"), Broken("ollama")).verify()
+
+        # The primary's message is the actionable one: it names the thing the
+        # user configured and expected to work.
+        assert not check.ok
+        assert "gemini down" in check.message

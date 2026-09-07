@@ -30,6 +30,19 @@ class InvalidLLMResponse(PipeMindAIError):
     code, status, retryable = "AI_INVALID_RESPONSE", 502, True
 
 
+class LLMAuthenticationFailed(PipeMindAIError):
+    """The provider rejected the credentials.
+
+    Deliberately NOT retryable, and deliberately not `LLMUnavailable`: a wrong
+    API key is a configuration mistake only a human can fix. Retrying it — at the
+    tenacity layer, then the fallback provider, then the queue — turns one typo
+    into nine useless round trips and buries the one message that would have
+    told the user what to do.
+    """
+
+    code, status, retryable = "AI_PROVIDER_UNAUTHORIZED", 401, False
+
+
 class BudgetExceeded(PipeMindAIError):
     code, status, retryable = "AI_BUDGET_EXCEEDED", 402, False
 

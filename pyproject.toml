@@ -44,6 +44,7 @@ dev = [
     "pytest-cov>=6.0,<7.0",
     "ruff>=0.8,<1.0",
     "respx>=0.21,<1.0",
+    "mypy>=1.13,<2.0",
 ]
 
 [build-system]
@@ -77,3 +78,29 @@ ignore = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app"]
+
+# Deliberately not --strict. The value here is catching a real type error in our
+# own code, not annotating every third-party boundary — and a gate that demands
+# the latter is a gate that gets switched off.
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = true
+no_implicit_optional = true
+check_untyped_defs = true
+
+# Vendor SDKs and ML libraries ship incomplete or absent stubs. Their internals
+# are not ours to type, and errors from them drown the ones that matter.
+[[tool.mypy.overrides]]
+module = [
+    "google.*",
+    "openai.*",
+    "sentence_transformers.*",
+    "sklearn.*",
+    "joblib.*",
+    "pgvector.*",
+]
+ignore_missing_imports = true

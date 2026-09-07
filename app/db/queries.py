@@ -96,7 +96,7 @@ async def find_knowledge_chunks(
     embedding: list[float],
     project_id: int | None = None,
     limit: int = 4,
-    threshold: float = 0.60,
+    threshold: float = 0.40,
 ) -> list[dict]:
     """Project docs and runbooks.
 
@@ -104,7 +104,7 @@ async def find_knowledge_chunks(
     this project's own runbook beats a generic team note.
     """
     sql = text("""
-        SELECT kc.content, kc.metadata, kc.chunk_index,
+        SELECT kc.content, kc.metadata, kc.chunk_index, kc.document_id,
                kd.title, kd.type AS source_type, kd.source_url, kd.project_id,
                1 - (kc.embedding <=> CAST(:emb AS vector)) AS similarity
         FROM knowledge_chunks kc
@@ -125,6 +125,51 @@ async def find_knowledge_chunks(
         "project_id": project_id,
         "limit": limit,
         "threshold": threshold,
+    })
+
+    return [dict(r) for r in rows.mappings()]
+
+
+async def find_chunk_neighbours(
+    session: AsyncSession,
+    team_id: int,
+    wanted: list[tuple[int, int]],
+) -> list[dict]:
+    """Fetches specific (document_id, chunk_index) pairs.
+
+    Exists because similarity alone retrieves the wrong half of a runbook. A
+    document is written symptom -> cause -> fix, and only the symptom section
+    repeats the error text, so that is the chunk that matches. Measured on a
+    real runbook, the chunk naming the error scored 0.573 while the chunk
+    holding the actual fix scored 0.059 — nearly orthogonal to the query. No
+    threshold separates that: 0.06 would admit every document in the workspace.
+
+    The neighbours of a hit are therefore not extra context, they are the
+    answer.
+    """
+    if not wanted:
+        return []
+
+    documents = [pair[0] for pair in wanted]
+    indexes = [pair[1] for pair in wanted]
+
+    sql = text("""
+        SELECT kc.content, kc.metadata, kc.chunk_index, kc.document_id,
+               kd.title, kd.type AS source_type, kd.source_url, kd.project_id
+        FROM knowledge_chunks kc
+        JOIN knowledge_documents kd ON kd.id = kc.document_id
+        WHERE kc.team_id = :team_id
+          AND kd.is_active = TRUE
+          AND (kc.document_id, kc.chunk_index) IN (
+              SELECT * FROM unnest(CAST(:documents AS bigint[]), CAST(:indexes AS int[]))
+          )
+        ORDER BY kc.document_id, kc.chunk_index
+    """)
+
+    rows = await session.execute(sql, {
+        "team_id": team_id,
+        "documents": documents,
+        "indexes": indexes,
     })
 
     return [dict(r) for r in rows.mappings()]

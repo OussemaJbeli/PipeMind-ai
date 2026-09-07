@@ -52,6 +52,15 @@ class EmbedResponse(BaseModel):
     source_text: str = ""
 
 
+class TestProviderResponse(BaseModel):
+    ok: bool
+    provider: str
+    model: str = ""
+    message: str = ""
+    models: list[str] = []
+    latency_ms: int = 0
+
+
 class EmbeddedChunk(BaseModel):
     index: int
     content: str
@@ -83,6 +92,8 @@ class Recommendation(BaseModel):
     risk: str = "medium"
     confidence: float = Field(0.5, ge=0, le=1)
     affected_files: list[str] = Field(default_factory=list)
+    # Validated in recommender.validate_patch: structurally sound, and scoped
+    # to files whose contents the model was actually shown.
     patch: str | None = None
 
 

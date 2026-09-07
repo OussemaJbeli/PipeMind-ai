@@ -15,7 +15,7 @@ import time
 from typing import Any
 
 from app.core.errors import InvalidLLMResponse, LLMTimeout, LLMUnavailable
-from app.providers.base import LLMResponse
+from app.providers.base import LLMResponse, ProviderCheck
 
 FENCED_JSON = re.compile(r"```(?:json)?\s*([\s\S]+?)\s*```")
 BRACED_JSON = re.compile(r"\{[\s\S]*\}")
@@ -110,13 +110,45 @@ class OllamaProvider:
         )
 
     async def health(self) -> bool:
+        return (await self.verify()).ok
+
+    async def verify(self) -> ProviderCheck:
+        """Ollama needs no key, so the question is different: is it running, and
+        is the model actually pulled? A model named in config but never pulled is
+        the usual local failure, and it is invisible until the first analysis."""
+        import time
+
         import httpx
+
+        started = time.perf_counter()
 
         try:
             async with httpx.AsyncClient(timeout=5) as client:
-                return (await client.get(f"{self._base_url}/api/tags")).is_success
-        except Exception:
-            return False
+                response = await client.get(f"{self._base_url}/api/tags")
+                response.raise_for_status()
+                names = [m["name"] for m in response.json().get("models", [])]
+        except Exception as exc:
+            return ProviderCheck(
+                ok=False, provider=self.name, model=self._model,
+                message=f"No Ollama server at {self._base_url}: {exc}",
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
+
+        elapsed = int((time.perf_counter() - started) * 1000)
+
+        # Ollama tags carry a :tag suffix; a bare model name should still match.
+        if not any(n == self._model or n.split(":")[0] == self._model for n in names):
+            return ProviderCheck(
+                ok=False, provider=self.name, model=self._model, models=sorted(names),
+                message=f"Ollama is running, but '{self._model}' is not pulled. "
+                        f"Run: ollama pull {self._model}",
+                latency_ms=elapsed,
+            )
+
+        return ProviderCheck(
+            ok=True, provider=self.name, model=self._model, models=sorted(names),
+            message=f"Connected to Ollama. {len(names)} models pulled.", latency_ms=elapsed,
+        )
 
     def cost(self, prompt_tokens: int, completion_tokens: int) -> float:
         # Local inference has no marginal cost. That is its whole argument.
