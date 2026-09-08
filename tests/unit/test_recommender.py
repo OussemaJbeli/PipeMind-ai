@@ -146,3 +146,93 @@ class TestPatchValidation:
         # The recommendation survives; only the untrustworthy diff is removed.
         assert out[0]["title"] == "Fix the closing tag"
         assert out[0]["patch"] is None
+
+
+class TestPatchPromotion:
+    """A diff that survives validation becomes a merge-request proposal.
+
+    Laravel has exactly one way to apply a file change — branch, commit, open a
+    merge request. Left as `edit_file` these recommendations reach an executor
+    that does not exist, so the best output of the whole analysis chain (an
+    applyable patch, pinned to the line that broke) could never be applied.
+    """
+
+    PATCH = (
+        "--- a/docker-compose.yml\n"
+        "+++ b/docker-compose.yml\n"
+        "@@ -1,2 +1,3 @@\n"
+        " services:\n"
+        "   postgres:\n"
+        "+    healthcheck: {test: pg_isready}\n"
+    )
+
+    def test_a_validated_patch_becomes_a_merge_request(self):
+        out = sanitize(
+            [{"action_type": "edit_file", "patch": self.PATCH,
+              "affected_files": ["docker-compose.yml"]}],
+            is_default_branch=False,
+            known_files={"docker-compose.yml"},
+        )
+
+        assert out[0]["action_type"] == "create_merge_request"
+        assert out[0]["patch"] is not None
+
+    def test_promotion_never_lowers_risk(self):
+        # update_config is HIGH; create_merge_request is MEDIUM. Taking the
+        # promoted action's own risk would quietly relax the policy gate, which
+        # is the exact thing assigning risk in code is meant to prevent.
+        out = sanitize(
+            [{"action_type": "update_config", "patch": self.PATCH,
+              "affected_files": ["docker-compose.yml"]}],
+            is_default_branch=False,
+            known_files={"docker-compose.yml"},
+        )
+
+        assert out[0]["action_type"] == "create_merge_request"
+        assert out[0]["risk"] == "high"
+
+    def test_a_rejected_patch_is_not_promoted(self):
+        # The patch touches a file the model was never shown, so validate_patch
+        # discards it — and an edit_file with no diff is exactly what it says it
+        # is: something a human does.
+        out = sanitize(
+            [{"action_type": "edit_file", "patch": self.PATCH,
+              "affected_files": ["docker-compose.yml"]}],
+            is_default_branch=False,
+            known_files={"somewhere/else.py"},
+        )
+
+        assert out[0]["action_type"] == "edit_file"
+        assert out[0]["patch"] is None
+
+    def test_a_recommendation_without_a_patch_is_untouched(self):
+        out = sanitize(
+            [{"action_type": "edit_file", "affected_files": ["a.py"]}],
+            is_default_branch=False,
+            known_files={"a.py"},
+        )
+
+        assert out[0]["action_type"] == "edit_file"
+
+    def test_retry_actions_are_never_promoted(self):
+        # A retry has no diff to apply, and promoting it would turn a harmless
+        # re-run into a repository write.
+        out = sanitize(
+            [{"action_type": "retry_job", "patch": self.PATCH,
+              "affected_files": ["docker-compose.yml"]}],
+            is_default_branch=False,
+            known_files={"docker-compose.yml"},
+        )
+
+        assert out[0]["action_type"] == "retry_job"
+
+    def test_default_branch_escalation_still_applies_after_promotion(self):
+        out = sanitize(
+            [{"action_type": "edit_file", "patch": self.PATCH,
+              "affected_files": ["docker-compose.yml"]}],
+            is_default_branch=True,
+            known_files={"docker-compose.yml"},
+        )
+
+        assert out[0]["action_type"] == "create_merge_request"
+        assert out[0]["risk"] == "high"

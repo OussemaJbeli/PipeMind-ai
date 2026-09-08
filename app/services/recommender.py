@@ -24,6 +24,16 @@ ACTION_RISK: dict[str, str] = {
 
 _ESCALATION = {"medium": "high", "high": "critical"}
 
+_RISK_ORDER = ["low", "medium", "high", "critical"]
+
+# File changes the model proposes as a diff. Laravel has exactly one way to
+# apply a file change — branch, commit, open a merge request — so a diff that
+# survives validation is a merge-request proposal whatever the model called it.
+# Without this promotion the best recommendations PipeMind produces are
+# unexecutable: they arrive as `edit_file`, which has no executor, so an
+# applyable patch can never become a pull request.
+_PATCHABLE = {"edit_file", "update_config", "update_dependency", "manual"}
+
 MAX_RECOMMENDATIONS = 5
 
 
@@ -51,6 +61,16 @@ def sanitize(
         # Whatever the model claimed, risk comes from the action.
         risk = ACTION_RISK[action]
 
+        patch = validate_patch(raw.get("patch"), known_files)
+
+        if patch and action in _PATCHABLE:
+            action = "create_merge_request"
+            # The higher of the two risks, never the promoted action's own.
+            # update_config is HIGH and create_merge_request is MEDIUM, so
+            # taking the new action's risk would quietly relax the gate — and
+            # the whole point of assigning risk in code is that nothing can.
+            risk = max(risk, ACTION_RISK[action], key=_RISK_ORDER.index)
+
         # Anything touching the default branch escalates one level.
         if is_default_branch:
             risk = _ESCALATION.get(risk, risk)
@@ -61,7 +81,7 @@ def sanitize(
             "risk": risk,
             "confidence": _clamp(raw.get("confidence", 0.5)),
             "affected_files": list(raw.get("affected_files") or [])[:20],
-            "patch": validate_patch(raw.get("patch"), known_files),
+            "patch": patch,
         })
 
     return cleaned
